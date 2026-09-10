@@ -10,18 +10,19 @@ class NetworkView(tk.Canvas):
         self.bind('<Configure>', lambda event: self.redraw())
 
     def show(self, features, weights, biases, scores, selected, active=10,
-             winner=None, target=None):
+               winner=None, target=None, bipolar=False):
         self.state = (features.copy(), weights.copy(), biases.copy(), scores.copy(),
-                      selected, active, winner, target)
+                      selected, active, winner, target, bipolar)
         self.redraw()
 
     def redraw(self):
         self.delete('all')
         if self.state is None:
             return
-        features, weights, biases, scores, selected, active, winner, target = self.state
+        features, weights, biases, scores, selected, active, winner, target, bipolar = self.state
         width, height = max(self.winfo_width(), 620), max(self.winfo_height(), 380)
-        self.create_text(25, 24, anchor='w', text='64 entradas / intensidade do pixel',
+        title = '64 entradas / bipolar (-1/+1)' if bipolar else '64 entradas / intensidade do pixel'
+        self.create_text(25, 24, anchor='w', text=title,
                          font=('Bahnschrift', 12), fill='#24332f')
         self.create_text(width * 0.62, 24, anchor='w', text='10 saidas / soma linear',
                          font=('Bahnschrift', 12), fill='#24332f')
@@ -40,11 +41,16 @@ class NetworkView(tk.Canvas):
                              width=0.5 + 2.5 * abs(value) / scale, tags='connection')
         radius = max(5, min(13, spacing * 0.35))
         for index, (horizontal, vertical) in enumerate(inputs):
-            shade = int(245 - features[index] * 210)
+            intensity = (features[index] + 1) / 2 if bipolar else features[index]
+            shade = int(245 - np.clip(intensity, 0, 1) * 210)
             self.create_oval(horizontal - radius, vertical - radius,
                              horizontal + radius, vertical + radius,
                              fill=f'#{shade:02x}{shade:02x}{shade:02x}',
                              outline='#b0beb8', tags='input')
+            if bipolar:
+                self.create_text(horizontal, vertical, text=f'{features[index]:+.0f}',
+                                 fill='white' if intensity > 0.5 else '#24332f',
+                                 font=('Consolas', 8), tags='input_value')
         for digit, (horizontal, vertical) in enumerate(outputs):
             color = '#087f70' if digit == winner else '#d8ece7' if digit < active else '#ffffff'
             outline = '#ca4260' if digit == target else '#087f70' if digit == selected else '#aab9b2'

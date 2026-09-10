@@ -33,6 +33,12 @@ Nao ha servidor web, conta, chave de API ou download de dataset em tempo de exec
 
 ## Experimento sugerido
 
+Em **Entrada**, selecione a codificacao antes de iniciar o treino. O padrao
+e **Bipolar (-1/+1)**. O seletor fica bloqueado durante a classificacao e
+depois de iniciar o treino; **Reiniciar rede** libera a escolha e limpa pesos,
+metricas e referencias. Trocar a codificacao antes do treino tambem reinicia
+esses estados, preservando o desenho original.
+
 1. Selecione **Detalhado** e pressione **Passo** tres vezes: entrada,
    somas antes da correcao e atualizacao. **Treinar** automatiza essas fases;
    **Pausar/Continuar** preserva a amostra corrente. Ajuste o intervalo em ms.
@@ -59,9 +65,45 @@ Nao ha servidor web, conta, chave de API ou download de dataset em tempo de exec
 
 O desenho permanece separado da amostra apresentada pelo treino no grafo.
 Durante uma amostra de treino, conclua suas fases com **Passo** antes de
-carregar ou classificar outra entrada. Taxa e total de epocas ficam fixos
+carregar ou classificar outra entrada. Codificacao, taxa e total de epocas ficam fixos
 ate reiniciar a rede. Os controles da interface sao executados por callbacks
 Tkinter, sem um loop de treinamento bloqueando a janela inteira.
+
+## Codificacao dos pixels
+
+A grade, a galeria e a base original continuam armazenadas entre 0 e 1.
+Uma unica funcao, `encode_pixels`, converte treino, teste e desenho para a
+codificacao selecionada. O perceptron recebe vetores ja convertidos.
+
+| Modo | Intensidade abaixo de 0.5 | Intensidade igual ou acima de 0.5 |
+| --- | --- | --- |
+| Bipolar (-1/+1), padrao | -1 | +1 |
+| Binaria (0/1) | 0 | 1 |
+| Tons de cinza (0 a 1) | Mantem intensidade original | Mantem intensidade original |
+
+O limiar e fixo em 0.5 nos dois modos discretos. Nao ha tons intermediarios
+no modo bipolar: a conversao e `2 * (pixels >= 0.5) - 1`, e nao simplesmente
+`2 * pixels - 1`. O slider continua alterando a intensidade original do desenho;
+o grafo mostra a entrada efetiva e rotula cada pixel bipolar como -1 ou +1.
+Desenhos que viram somente fundo depois da conversao sao rejeitados como vazios.
+
+Um pixel -1 contribui com o negativo do peso. Na atualizacao da classe correta,
+ele diminui o peso em vez de deixa-lo inalterado, como aconteceria com entrada 0.
+Os rotulos de classe continuam sendo os digitos 0 a 9, sem conversao bipolar.
+
+Exemplo para usar o modelo sem a interface:
+
+```python
+from dataset import encode_pixels, load_reference_dataset
+from perceptron import MultiClassPerceptron
+
+data = load_reference_dataset()
+train = encode_pixels(data.train_images, mode='bipolar')
+test = encode_pixels(data.test_images, mode='bipolar')
+model = MultiClassPerceptron()
+model.fit(list(zip(train, data.train_labels)), epochs=20)
+print(model.evaluate(list(zip(test, data.test_labels))))
+```
 
 ## Regra de aprendizado
 
@@ -89,13 +131,17 @@ simulacao biologica nem uma rede de disparos temporais.
   mapa de diferencas tem escala propria, indicada no titulo. Verde e positivo;
   rosa e negativo. Coordenadas da tabela comecam em zero, em ordem linha/coluna.
 - **CSV** exporta 650 linhas: 64 pesos e um bias para cada uma das 10 classes,
-  com contribuicoes e pontuacoes completas. A soma das contribuicoes de uma
+  com contribuicoes, pontuacoes completas, codificacao e limiar. A soma das contribuicoes de uma
   classe, incluindo o bias, reproduz sua pontuacao.
 - **JSON** exporta pesos, biases, entrada analisada, contribuicoes, pontuacoes,
   referencia, indices de treino/teste, descricao da base, metricas e o registro
   de cada amostra: epoca, indice original, rotulo, previsao anterior, pontuacoes,
-  taxa e se houve atualizacao. O registro, aplicado desde pesos zerados sobre
-  a mesma base, reproduz os pesos finais. A exportacao nao e um mecanismo de
+  taxa e se houve atualizacao. Inclui `encoding` e `threshold`; `features` ja
+  contem a entrada convertida, enquanto `normalization` descreve a divisao
+  inicial dos pixels por 16. O registro, aplicado desde pesos zerados sobre
+  a mesma base convertida com essa codificacao e limiar, reproduz os pesos finais.
+  Nao converta `features` novamente para reconstruir as pontuacoes exportadas.
+  A exportacao nao e um mecanismo de
   carregamento/retomada de modelo nesta versao.
 - A referencia capturada e independente da copia do ultimo passo. Ambas
   ficam em memoria ate reiniciar ou fechar; exporte para preservar a auditoria.
@@ -105,7 +151,7 @@ simulacao biologica nem uma rede de disparos temporais.
 `sklearn.datasets.load_digits` inclui 1.797 imagens reais manuscritas de
 8x8 pixels da base **UCI Optical Recognition of Handwritten Digits**.
 Autores: E. Alpaydin e C. Kaynak. As intensidades originais variam de 0 a 16
-e sao divididas por 16 para obter entradas entre 0 e 1.
+e sao divididas por 16 para obter imagens entre 0 e 1 antes da codificacao.
 
 - Documentacao: https://scikit-learn.org/stable/modules/generated/sklearn.datasets.load_digits.html
 - Fonte: https://archive.ics.uci.edu/dataset/80/optical+recognition+of+handwritten+digits
@@ -114,8 +160,11 @@ e sao divididas por 16 para obter entradas entre 0 e 1.
 - O teste nunca atualiza pesos. Suas metricas sao exibidas para fins didaticos;
   se usadas para escolher parametros, deixam de ser uma estimativa independente
   final. Em um estudo formal, acrescente validacao e um teste final intocado.
-- Verificacao local: 20 epocas, taxa 0.1, 96,07% no treino e 91,56% no teste.
-  Isso nao garante o mesmo desempenho em desenhos novos feitos com o mouse.
+- Verificacao local com 20 epocas e taxa 0.1: bipolar com 96,44% no treino
+  e 88,67% no teste; binaria com 95,77% e 89,33%; tons de cinza com 96,07%
+  e 91,56%. Os modos usam a mesma divisao e ordem de amostras. A codificacao
+  bipolar nao garante maior acuracia, e discretizar elimina informacao de
+  intensidade. Isso nao garante o mesmo desempenho em desenhos novos com o mouse.
 - Centralize o digito e use tons de cinza semelhantes aos exemplos. Nao ha
   normalizacao automatica de posicao, rotacao ou espessura do traco. Uma rede
   linear nao separa todos os casos; o erro pode oscilar durante o treinamento.
@@ -124,7 +173,7 @@ e sao divididas por 16 para obter entradas entre 0 e 1.
 
 ## Arquivos e testes
 
-- `dataset.py`: carregamento, normalizacao e separacao da base.
+- `dataset.py`: carregamento, normalizacao, codificacao e separacao da base.
 - `perceptron.py`: modelo, um passo de treino, inferencia e inspecao numerica.
 - `visualization.py`: desenho do grafo em Tkinter.
 - `interface.py`: interface, animacoes, curvas, auditoria e exportacoes.
@@ -138,7 +187,9 @@ e sao divididas por 16 para obter entradas entre 0 e 1.
 Os testes da interface precisam de uma sessao grafica e abrem janelas brevemente.
 Verificam desenho e borracha, fases do treino, classificacao sem alterar pesos,
 renderizacao dos graficos, CSV/JSON, independencia da referencia, equivalencia
-do modo rapido e reproducao do historico. Para testar somente o nucleo:
+do modo rapido e reproducao do historico nas tres codificacoes. Tambem verificam
+o limiar, a entrada negativa, os metadados exportados e o bloqueio da troca
+de codificacao depois do treino. Para testar somente o nucleo:
 
 ```powershell
 & '..\.venv\Scripts\python.exe' -m unittest test_perceptron.PerceptronTests -v

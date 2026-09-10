@@ -9,9 +9,13 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 from sklearn.metrics import confusion_matrix
 
-from dataset import load_reference_dataset
+from dataset import encode_pixels, load_reference_dataset
 from perceptron import MultiClassPerceptron
 from visualization import NetworkView
+
+
+ENCODINGS = {'Bipolar (-1/+1)': 'bipolar', 'Binaria (0/1)': 'binary',
+             'Tons de cinza (0 a 1)': 'grayscale'}
 
 
 class PerceptronApp:
@@ -21,8 +25,13 @@ class PerceptronApp:
         root.geometry('1280x850')
         root.minsize(1100, 760)
         self.data = load_reference_dataset()
+        self.encoding = tk.StringVar(value='Bipolar (-1/+1)')
+        self.input_mode = 'bipolar'
+        self.threshold = 0.5
+        self.train_features = self.encode(self.data.train_images)
+        self.test_features = self.encode(self.data.test_images)
         self.drawing = np.zeros(64)
-        self.features = self.drawing.copy()
+        self.features = self.encode(self.drawing)
         self.drawing_source = self.source = 'Desenho manual'
         self.pending = self.last_step = self.job = self.order = None
         self.running = self.classifying = False
@@ -117,6 +126,14 @@ class PerceptronApp:
         self.epoch_entry.pack(side='left', padx=4)
         ttk.Combobox(controls, values=['Detalhado', 'Rapido (50 amostras/quadro)'],
                      textvariable=self.speed, state='readonly', width=27).pack(side='left', padx=6)
+        encoding_controls = ttk.Frame(network_tab)
+        encoding_controls.pack(fill='x', pady=(6, 0))
+        ttk.Label(encoding_controls, text='Entrada').pack(side='left')
+        self.encoding_entry = ttk.Combobox(encoding_controls, values=list(ENCODINGS),
+                          textvariable=self.encoding, state='readonly', width=24)
+        self.encoding_entry.pack(side='left', padx=6)
+        self.encoding_entry.bind('<<ComboboxSelected>>', self.change_encoding)
+        ttk.Label(encoding_controls, text='Limiar binario/bipolar: 0.5').pack(side='left')
         commands = ttk.Frame(network_tab)
         commands.pack(fill='x', pady=8)
         self.run_button = ttk.Button(commands, text='Treinar', command=self.toggle_training)
@@ -168,7 +185,8 @@ class PerceptronApp:
                   font=('Bahnschrift', 15, 'bold')).pack(anchor='w', pady=8)
         ttk.Label(data_tab, text='1.797 imagens / 64 pixels / classes 0 a 9\n'
                   'Treino: 1.347 | Teste: 450 | Separacao estratificada | Semente: 42\n'
-                  'Intensidades originais: 0 a 16 | Entrada da rede: 0 a 1',
+                  'Intensidades originais: 0 a 16 | Imagens abaixo: tons de cinza\n'
+                  'Entrada da rede: codificacao selecionada na aba Rede ao vivo',
                   justify='left').pack(anchor='w', pady=8)
         gallery = Figure(figsize=(8, 4), dpi=100, layout='constrained')
         for digit, axis in enumerate(gallery.subplots(2, 5).flat):
@@ -181,6 +199,18 @@ class PerceptronApp:
         ttk.Label(data_tab, text='Fonte: sklearn.datasets.load_digits / UCI ML Repository',
                   wraplength=700).pack(anchor='w', pady=10)
 
+    def encode(self, pixels):
+        return encode_pixels(pixels, self.input_mode, self.threshold)
+
+    def change_encoding(self, event=None):
+        if self.running or self.classifying or self.pending is not None or self.records:
+            self.encoding.set(next(label for label, mode in ENCODINGS.items() if mode == self.input_mode))
+            return
+        self.input_mode = ENCODINGS[self.encoding.get()]
+        self.train_features = self.encode(self.data.train_images)
+        self.test_features = self.encode(self.data.test_images)
+        self.reset()
+
     def paint(self, event, erase=False):
         if self.running or self.classifying or self.pending is not None:
             return
@@ -190,6 +220,9 @@ class PerceptronApp:
             self.drawing_source = 'Desenho manual'
             self.result.set('Resultado: --')
             self.draw_pixels()
+            self.features = self.encode(self.drawing)
+            self.source = self.drawing_source
+            self.refresh()
 
     def draw_pixels(self):
         for index, cell in enumerate(self.cells):
@@ -200,7 +233,7 @@ class PerceptronApp:
         if self.running or self.classifying or self.pending is not None:
             return
         self.drawing.fill(0)
-        self.features = self.drawing.copy()
+        self.features = self.encode(self.drawing)
         self.drawing_source = self.source = 'Desenho manual'
         self.result.set('Resultado: --')
         self.draw_pixels()
@@ -217,7 +250,7 @@ class PerceptronApp:
         index = candidates[self.reference_cursor % len(candidates)]
         self.reference_cursor += 1
         self.drawing = images[index].copy()
-        self.features = self.drawing.copy()
+        self.features = self.encode(self.drawing)
         self.drawing_source = self.source = f'{self.partition.get()} / indice UCI {indices[index]} / rotulo {labels[index]}'
         self.status.set(self.source)
         self.result.set('Resultado: --')
@@ -236,6 +269,7 @@ class PerceptronApp:
         self.target_epochs = epochs
         self.rate_entry.configure(state='disabled')
         self.epoch_entry.configure(state='disabled')
+        self.encoding_entry.configure(state='disabled')
         return True
 
     def toggle_training(self):
@@ -293,7 +327,7 @@ class PerceptronApp:
             if self.order is None:
                 self.order = self.random.permutation(len(self.data.train_labels))
             index = int(self.order[self.position])
-            self.features = self.data.train_images[index].copy()
+            self.features = self.train_features[index].copy()
             label = int(self.data.train_labels[index])
             self.pending = {'index': index, 'label': label, 'phase': 'entrada'}
             self.source = f'Treino / indice UCI {self.data.train_indices[index]} / rotulo {label}'
@@ -326,8 +360,8 @@ class PerceptronApp:
 
     def finish_epoch(self):
         self.epoch += 1
-        train = self.model.evaluate(list(zip(self.data.train_images, self.data.train_labels)))
-        test = self.model.evaluate(list(zip(self.data.test_images, self.data.test_labels)))
+        train = self.model.evaluate(list(zip(self.train_features, self.data.train_labels)))
+        test = self.model.evaluate(list(zip(self.test_features, self.data.test_labels)))
         self.history.append({'epoch': self.epoch, 'mistakes': self.mistakes, 'train': train, 'test': test})
         self.position = self.mistakes = 0
         self.order = None
@@ -339,12 +373,15 @@ class PerceptronApp:
         if self.pending is not None:
             self.status.set('Conclua a amostra atual com Passo antes de classificar.')
             return
-        if not np.any(self.drawing):
+        features = self.encode(self.drawing)
+        background = -1.0 if self.input_mode == 'bipolar' else 0.0
+        if not np.any(features != background):
             self.result.set('Entrada vazia')
             return
-        self.features = self.drawing.copy()
+        self.features = features
         self.source = self.drawing_source
         self.classifying = True
+        self.encoding_entry.configure(state='disabled')
         self.classification_active = 0
         self.result.set('Calculando...')
         self.tabs.select(0)
@@ -355,11 +392,14 @@ class PerceptronApp:
         audit = self.model.inspect(self.features)
         active = self.classification_active
         self.network.show(self.features, self.model.weights, self.model.biases, audit.scores,
-                          min(active, 9), active=active, winner=audit.predicted if active == 10 else None)
+                          min(active, 9), active=active, winner=audit.predicted if active == 10 else None,
+                          bipolar=self.input_mode == 'bipolar')
         self.status.set(f'Classificacao / somas calculadas: {active} de 10 / '
                         f'{"rede sem treino" if not self.records else "pesos atuais"}')
         if active == 10:
             self.classifying = False
+            if not self.records:
+                self.encoding_entry.configure(state='readonly')
             self.selected.set(str(audit.predicted))
             self.result.set(f'Digito: {audit.predicted}')
             self.refresh()
@@ -375,7 +415,8 @@ class PerceptronApp:
         target = self.pending['label'] if self.pending else None
         self.network.show(self.features, self.model.weights, self.model.biases, audit.scores,
                           int(self.selected.get()), active=active,
-                          winner=audit.predicted if active == 10 else None, target=target)
+                          winner=audit.predicted if active == 10 else None, target=target,
+                          bipolar=self.input_mode == 'bipolar')
         tab = self.tabs.select()
         if tab == str(self.audit_tab):
             self.refresh_audit()
@@ -426,7 +467,7 @@ class PerceptronApp:
         self.accuracy_axis.legend(fontsize=8)
         self.error_axis.plot(epochs, [entry['mistakes'] for entry in self.history], color='#536ab8')
         self.error_axis.set(title='Erros antes da atualizacao', xlabel='Epoca', ylabel='Amostras')
-        matrix = confusion_matrix(self.data.test_labels, self.model.predict(self.data.test_images), labels=range(10))
+        matrix = confusion_matrix(self.data.test_labels, self.model.predict(self.test_features), labels=range(10))
         self.confusion_axis.imshow(matrix, cmap='Greens')
         self.confusion_axis.set(title='Matriz de confusao / teste / pesos atuais',
                                 xlabel='Previsto', ylabel='Real', xticks=range(10), yticks=range(10))
@@ -451,7 +492,7 @@ class PerceptronApp:
                 writer = csv.writer(output)
                 writer.writerow(['class', 'pixel', 'input', 'reference_weight', 'current_weight',
                                  'delta_reference', 'before_last_step', 'delta_last_step',
-                                 'contribution', 'score', 'predicted'])
+                                 'contribution', 'score', 'predicted', 'encoding', 'threshold'])
                 for digit in range(10):
                     for index in range(65):
                         is_bias = index == 64
@@ -462,11 +503,13 @@ class PerceptronApp:
                             self.last_step.biases_before[digit] if is_bias else self.last_step.weights_before[digit, index])
                         writer.writerow([digit, 'bias' if is_bias else index, value, baseline,
                                          weight, weight - baseline, before, weight - before,
-                                         value * weight, audit.scores[digit], audit.predicted])
+                                         value * weight, audit.scores[digit], audit.predicted,
+                                         self.input_mode, self.threshold])
         else:
             payload = {
                 'architecture': [64, 10], 'rule': 'multiclass perceptron, argmax, first index on ties',
                 'seed': 42, 'normalization': 'pixel / 16', 'source': self.source,
+                'encoding': self.input_mode, 'threshold': self.threshold,
                 'learning_rate': self.model.learning_rate, 'epochs_completed': self.epoch,
                 'updates': self.model.updates, 'features': self.features.tolist(),
                 'weights': self.model.weights.tolist(), 'biases': self.model.biases.tolist(),
@@ -482,6 +525,8 @@ class PerceptronApp:
     def export_dialog(self):
         self.pause()
         self.classifying = False
+        if not self.records and self.pending is None:
+            self.encoding_entry.configure(state='readonly')
         filename = filedialog.asksaveasfilename(defaultextension='.json',
                     filetypes=[('Auditoria completa', '*.json'), ('Pesos e contribuicoes', '*.csv')])
         if filename:
@@ -500,10 +545,11 @@ class PerceptronApp:
         self.epoch = self.position = self.mistakes = 0
         self.history.clear()
         self.records.clear()
-        self.features = self.drawing.copy()
+        self.features = self.encode(self.drawing)
         self.source = self.drawing_source
         self.rate_entry.configure(state='normal')
         self.epoch_entry.configure(state='normal')
+        self.encoding_entry.configure(state='readonly')
         self.run_button.configure(text='Treinar')
         self.result.set('Resultado: --')
         self.progress.set('Epoca 0 | 0 atualizacoes')

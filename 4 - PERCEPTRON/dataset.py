@@ -16,6 +16,21 @@ class ReferenceDataset:
 	description: str
 
 
+def encode_pixels(pixels, mode='bipolar', threshold=0.5):
+	"""Convert normalized pixels without modifying the original image."""
+	if mode not in ('grayscale', 'binary', 'bipolar'):
+		raise ValueError('Codificacao desconhecida.')
+	if not np.isfinite(threshold) or not 0 < threshold <= 1:
+		raise ValueError('O limiar deve estar no intervalo (0, 1].')
+	values = np.asarray(pixels, dtype=float)
+	if not np.isfinite(values).all() or np.any((values < 0) | (values > 1)):
+		raise ValueError('Pixels devem estar entre 0 e 1.')
+	if mode == 'grayscale':
+		return values.copy()
+	binary = (values >= threshold).astype(float)
+	return 2.0 * binary - 1.0 if mode == 'bipolar' else binary
+
+
 def load_reference_dataset(seed: int = 42) -> ReferenceDataset:
 	"""Load the bundled UCI digits data; keep the test partition out of training."""
 	digits = load_digits()

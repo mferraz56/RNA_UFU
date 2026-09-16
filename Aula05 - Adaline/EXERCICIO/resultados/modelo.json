@@ -1,0 +1,62 @@
+{
+  "dataset": "C:\\Github\\Mente-Meio-Maquina\\Obisidian-MMM\\RNA_UFU\\Aula05 - Adaline\\EXERCICIO\\Basedados_B2.csv",
+  "seed": 42,
+  "learning_rate": 0.01,
+  "epochs": 200,
+  "test_fraction": 0.3,
+  "independent_test": true,
+  "input_transform": "none; continuous s1 and s2",
+  "threshold": 0.0,
+  "initial_weights": [
+    0.27395604855596334,
+    -0.06112156024794768
+  ],
+  "initial_bias": 0.35859791991138246,
+  "weights": [
+    -0.6608876081533921,
+    -0.6340507111924993
+  ],
+  "bias": 1.885494396783277,
+  "initial_sse": 25.207205295646624,
+  "final_sse": 2.54061556238459,
+  "train_accuracy": 1.0,
+  "evaluation_accuracy": 1.0,
+  "confusion_labels": [
+    -1,
+    1
+  ],
+  "confusion_matrix": [
+    [
+      3,
+      0
+    ],
+    [
+      0,
+      3
+    ]
+  ],
+  "train_csv_lines": [
+    2,
+    3,
+    4,
+    5,
+    6,
+    9,
+    11,
+    12,
+    13,
+    16,
+    17,
+    18,
+    20,
+    21
+  ],
+  "test_csv_lines": [
+    7,
+    8,
+    10,
+    14,
+    15,
+    19
+  ]
+}

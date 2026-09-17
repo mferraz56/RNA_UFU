@@ -196,6 +196,9 @@ class SolarNetworkView(tk.Canvas):
             cy = margin_top + i * out_spacing + 10
             self.output_nodes[i] = (out_x, cy)
 
+        # Compute max hidden activation for relative scaling
+        max_h_act = max(float(np.max(hidden_acts)), 1e-4) if (hidden_acts is not None and len(hidden_acts) > 0) else 1.0
+
         # 4. DRAW CONTINUOUS SYNAPTIC EDGES (Input -> Hidden -> Output)
         if st.get('show_edges', True):
             # A) Input -> Hidden Edges (Always visible & active)
@@ -206,6 +209,7 @@ class SolarNetworkView(tk.Canvas):
                         if h_idx in self.hidden_nodes:
                             hcx, hcy = self.hidden_nodes[h_idx]
                             act = hidden_acts[h_idx] if h_idx < len(hidden_acts) else 0.0
+                            rel_act = act / max_h_act
                             
                             r_start = int((hr / h_rows) * 40)
                             r_end = int(((hr + 1) / h_rows) * 40)
@@ -215,9 +219,9 @@ class SolarNetworkView(tk.Canvas):
                             region_cx = mat_x + ((c_start + c_end) / 2.0) * cell_w
                             region_cy = mat_y + ((r_start + r_end) / 2.0) * cell_h
                             
-                            if act > 0.1:
-                                col = '#0284c7' if act < 0.5 else '#38bdf8'
-                                lw = 0.8 + 2.0 * np.clip(act, 0, 1)
+                            if rel_act > 0.05:
+                                col = '#0284c7' if rel_act < 0.5 else '#38bdf8'
+                                lw = 0.8 + 2.2 * np.clip(rel_act, 0, 1)
                             else:
                                 col = '#1e293b'
                                 lw = 0.5
@@ -238,9 +242,10 @@ class SolarNetworkView(tk.Canvas):
                     
                     for h_idx, (hcx, hcy) in self.hidden_nodes.items():
                         act = hidden_acts[h_idx] if h_idx < len(hidden_acts) else 0.0
-                        if act > 0.05:
+                        rel_act = act / max_h_act
+                        if rel_act > 0.05:
                             edge_col = '#2ecc71' if is_win_edge else '#0284c7'
-                            lw = 0.8 + 2.5 * np.clip(act, 0, 1)
+                            lw = 0.8 + 2.5 * np.clip(rel_act, 0, 1)
                             self.create_line(hcx, hcy, ocx, ocy, fill=edge_col, width=lw, tags='edge_layer2')
 
         # C) Specific Hovered / Selected Pixel Edge Streamer (High-Contrast Highlight)
@@ -271,16 +276,16 @@ class SolarNetworkView(tk.Canvas):
             for h_idx, (cx, cy) in self.hidden_nodes.items():
                 act = hidden_acts[h_idx] if (hidden_acts is not None and h_idx < len(hidden_acts)) else 0.0
                 is_sel = (h_idx == self.selected_hidden)
+                rel_act = act / max_h_act
                 
-                intensity = np.clip(act, 0, 1)
-                g_val = int(120 + intensity * 135)
-                fill_hex = f'#00{g_val:02x}80' if intensity > 0.05 else '#1e293b'
-                outline_color = '#f59e0b' if is_sel else '#38bdf8' if intensity > 0.2 else '#475569'
+                g_val = int(120 + np.clip(rel_act, 0, 1) * 135)
+                fill_hex = f'#00{g_val:02x}80' if act > 0.001 else '#1e293b'
+                outline_color = '#f59e0b' if is_sel else '#00f0ff' if rel_act > 0.3 else '#475569'
                 
                 self.create_oval(cx - 11, cy - 11, cx + 11, cy + 11,
                                  fill=fill_hex, outline=outline_color, width=2 if is_sel else 1)
                 
-                self.create_text(cx, cy, text=f"H{h_idx}", fill='white' if intensity > 0.2 else '#94a3b8',
+                self.create_text(cx, cy, text=f"H{h_idx}", fill='white' if act > 0.001 else '#94a3b8',
                                  font=('Consolas', 7, 'bold'))
 
             if len(self.hidden_nodes) > 0:

@@ -558,17 +558,6 @@ class SolarApp:
                 self.epoch += 1
                 np.random.default_rng().shuffle(self.order)
 
-                tr_acc, tr_loss, _, _ = evaluate_network(self.active_model, self.dataset, self.train_idx[:500])
-                val_acc, val_loss, _, _ = evaluate_network(self.active_model, self.dataset, self.val_idx[:300])
-
-                self.history.append({
-                    'epoch': self.epoch,
-                    'train_acc': tr_acc,
-                    'val_acc': val_acc,
-                    'loss': tr_loss
-                })
-                self.update_plots()
-
                 if self.epoch >= max_epochs:
                     self.stop_training()
                     messagebox.showinfo("Treinamento Concluído", f"Treinamento de {max_epochs} épocas finalizado com sucesso!")
@@ -589,8 +578,21 @@ class SolarApp:
         self.drawing = x.reshape(40, 24)
         self.render_image_canvas(self.drawing)
 
+        # Record live metric checkpoint
+        step_progress = self.epoch + (self.position / max(len(self.train_idx), 1))
+        tr_acc, tr_loss, _, _ = evaluate_network(self.active_model, self.dataset, self.train_idx[:200])
+        val_acc, val_loss, _, _ = evaluate_network(self.active_model, self.dataset, self.val_idx[:150])
+
+        self.history.append({
+            'epoch': round(step_progress, 2),
+            'train_acc': tr_acc,
+            'val_acc': val_acc,
+            'loss': tr_loss
+        })
+
         self.progress_var.set(f"Época {self.epoch + 1} / {max_epochs} | {self.updates_count} Atualizações")
         self.refresh_view()
+        self.update_plots()
 
         delay_ms = int(self.delay_var.get())
         self.job = self.root.after(delay_ms, self.run_training_loop)

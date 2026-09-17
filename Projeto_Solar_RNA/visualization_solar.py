@@ -199,53 +199,49 @@ class SolarNetworkView(tk.Canvas):
         # 4. DRAW CONTINUOUS SYNAPTIC EDGES (Input -> Hidden -> Output)
         if st.get('show_edges', True):
             # A) Input -> Hidden Edges (Always visible & active)
-        if is_mlp and len(self.hidden_nodes) > 0:
-            # Connect spatial sub-regions of 24x40 matrix to the 4x6 hidden detectors
-            for hr in range(h_rows):
-                for hc in range(h_cols):
-                    h_idx = hr * h_cols + hc
-                    if h_idx in self.hidden_nodes:
-                        hcx, hcy = self.hidden_nodes[h_idx]
-                        act = hidden_acts[h_idx] if h_idx < len(hidden_acts) else 0.0
-                        
-                        # Find corresponding spatial sub-region in 24x40 matrix
-                        r_start = int((hr / h_rows) * 40)
-                        r_end = int(((hr + 1) / h_rows) * 40)
-                        c_start = int((hc / h_cols) * 24)
-                        c_end = int(((hc + 1) / h_cols) * 24)
-                        
-                        # Center of region in canvas
-                        region_cx = mat_x + ((c_start + c_end) / 2.0) * cell_w
-                        region_cy = mat_y + ((r_start + r_end) / 2.0) * cell_h
-                        
-                        # Line color & width based on activation level
-                        if act > 0.1:
-                            col = '#0284c7' if act < 0.5 else '#38bdf8'
-                            lw = 0.8 + 2.0 * np.clip(act, 0, 1)
-                        else:
-                            col = '#1e293b'
-                            lw = 0.5
+            if is_mlp and len(self.hidden_nodes) > 0:
+                for hr in range(h_rows):
+                    for hc in range(h_cols):
+                        h_idx = hr * h_cols + hc
+                        if h_idx in self.hidden_nodes:
+                            hcx, hcy = self.hidden_nodes[h_idx]
+                            act = hidden_acts[h_idx] if h_idx < len(hidden_acts) else 0.0
+                            
+                            r_start = int((hr / h_rows) * 40)
+                            r_end = int(((hr + 1) / h_rows) * 40)
+                            c_start = int((hc / h_cols) * 24)
+                            c_end = int(((hc + 1) / h_cols) * 24)
+                            
+                            region_cx = mat_x + ((c_start + c_end) / 2.0) * cell_w
+                            region_cy = mat_y + ((r_start + r_end) / 2.0) * cell_h
+                            
+                            if act > 0.1:
+                                col = '#0284c7' if act < 0.5 else '#38bdf8'
+                                lw = 0.8 + 2.0 * np.clip(act, 0, 1)
+                            else:
+                                col = '#1e293b'
+                                lw = 0.5
 
-                        self.create_line(region_cx, region_cy, hcx, hcy,
-                                         fill=col, width=lw, tags='edge_layer1')
+                            self.create_line(region_cx, region_cy, hcx, hcy,
+                                             fill=col, width=lw, tags='edge_layer1')
 
-        # B) Hidden -> Output Edges (Always visible for Active/Selected/Winner Outputs)
-        if is_mlp and len(self.hidden_nodes) > 0:
-            target_outputs = set()
-            if winner is not None:
-                target_outputs.add(winner)
-            target_outputs.add(self.selected_output)
-            
-            for o_idx in target_outputs:
-                ocx, ocy = self.output_nodes[o_idx]
-                is_win_edge = (o_idx == winner)
+            # B) Hidden -> Output Edges (Always visible for Active/Selected/Winner Outputs)
+            if is_mlp and len(self.hidden_nodes) > 0:
+                target_outputs = set()
+                if winner is not None:
+                    target_outputs.add(winner)
+                target_outputs.add(self.selected_output)
                 
-                for h_idx, (hcx, hcy) in self.hidden_nodes.items():
-                    act = hidden_acts[h_idx] if h_idx < len(hidden_acts) else 0.0
-                    if act > 0.05:
-                        edge_col = '#2ecc71' if is_win_edge else '#0284c7'
-                        lw = 0.8 + 2.5 * np.clip(act, 0, 1)
-                        self.create_line(hcx, hcy, ocx, ocy, fill=edge_col, width=lw, tags='edge_layer2')
+                for o_idx in target_outputs:
+                    ocx, ocy = self.output_nodes[o_idx]
+                    is_win_edge = (o_idx == winner)
+                    
+                    for h_idx, (hcx, hcy) in self.hidden_nodes.items():
+                        act = hidden_acts[h_idx] if h_idx < len(hidden_acts) else 0.0
+                        if act > 0.05:
+                            edge_col = '#2ecc71' if is_win_edge else '#0284c7'
+                            lw = 0.8 + 2.5 * np.clip(act, 0, 1)
+                            self.create_line(hcx, hcy, ocx, ocy, fill=edge_col, width=lw, tags='edge_layer2')
 
         # C) Specific Hovered / Selected Pixel Edge Streamer (High-Contrast Highlight)
         active_pix = self.hovered_pixel or self.selected_pixel

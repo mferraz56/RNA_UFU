@@ -1,0 +1,8 @@
+{
+  "image_shape": [40, 24],
+  "mask_shape": [8, 8],
+  "hidden_grid": [64, 17],
+  "output_grid": [12, 1],
+  "activation": "relu",
+  "seed": 42
+}

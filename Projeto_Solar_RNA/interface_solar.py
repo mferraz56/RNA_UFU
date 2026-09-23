@@ -13,29 +13,33 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 from sklearn.metrics import confusion_matrix
 
-from Projeto_Solar_RNA.dataset_solar import SolarDataset, CLASSES, get_class_group, GROUP_COLORS
+from Projeto_Solar_RNA.dataset_solar import SolarDataset, CLASSES, get_class_group, GROUP_COLORS, NUM_PIXELS
 from Projeto_Solar_RNA.neural_network import SingleLayerPerceptron, MLPSolarNetwork, evaluate_network
 from Projeto_Solar_RNA.visualization_solar import SolarNetworkView, CLASSES_SHORT
+from Projeto_Solar_RNA.network_config import load_network_config
 
 
 class SolarApp:
-    def __init__(self, root):
+    def __init__(self, root, config_path=None):
         self.root = root
+        self.config = load_network_config(config_path)
+        self.mlp_label = f'MLP ({self.config.num_inputs} → {self.config.num_hidden} → {self.config.num_classes})'
         root.title('Laboratório RNA Solar | Inspeção Térmica e Diagnóstico de Painéis Fotovoltaicos')
         root.geometry('1400x900')
         root.minsize(1200, 800)
         
         # Load Dataset
         self.status = tk.StringVar(value='Carregando dataset infravermelho...')
-        self.dataset = SolarDataset()
-        self.train_idx, self.val_idx, self.test_idx = self.dataset.split_dataset(seed=42)
+        self.dataset = SolarDataset(config=self.config)
+        self.statistics_path = self.dataset.export_intensity_statistics()
+        self.train_idx, self.val_idx, self.test_idx = self.dataset.split_dataset(seed=self.config.seed)
         
         # Preload initial subset for fluid GUI responsiveness
         self.dataset.preload_subset(self.train_idx, max_count=500)
         self.dataset.preload_subset(self.test_idx, max_count=200)
 
         # App Variables
-        self.architecture_var = tk.StringVar(value='MLP (Camada Oculta 4x6 = 24 Detectores)')
+        self.architecture_var = tk.StringVar(value=self.mlp_label)
         self.partition_var = tk.StringVar(value='Teste')
         self.class_filter_var = tk.StringVar(value='Todas')
         self.sample_idx_var = tk.IntVar(value=0)
@@ -59,13 +63,13 @@ class SolarApp:
         
         # Current thermal image (40, 24)
         self.drawing = np.full((40, 24), 0.25, dtype=np.float32)
-        self.current_feature_vector = self.drawing.flatten()
+        self.current_feature_vector = self.dataset.build_feature_vector(self.drawing, config=self.config)
         self.current_label = 0
         self.is_manual_drawing = False
 
         # Neural Models
-        self.perceptron = SingleLayerPerceptron(num_inputs=960, num_classes=12)
-        self.mlp = MLPSolarNetwork(num_inputs=960, hidden_grid=(4, 6), num_classes=12)
+        self.perceptron = SingleLayerPerceptron(config=self.config)
+        self.mlp = MLPSolarNetwork(config=self.config)
         self.active_model = self.mlp
 
         # Training State
@@ -227,14 +231,14 @@ class SolarApp:
 
         ttk.Label(top_bar, text='Modelo:').pack(side='left')
         cb_arch = ttk.Combobox(top_bar, textvariable=self.architecture_var,
-                               values=['Perceptron Simples (1 Camada)', 'MLP (Camada Oculta 4x6 = 24 Detectores)'],
+                               values=['Perceptron Simples (1 Camada)', self.mlp_label],
                                state='readonly', width=32)
         cb_arch.pack(side='left', padx=(4, 16))
         cb_arch.bind('<<ComboboxSelected>>', lambda e: self.on_architecture_change())
 
         ttk.Label(top_bar, text='Auditar Classe:').pack(side='left')
         cb_focus = ttk.Combobox(top_bar, textvariable=self.selected_output_var,
-                                values=[str(i) for i in range(12)], state='readonly', width=5)
+                                values=[str(i) for i in range(self.config.num_classes)], state='readonly', width=5)
         cb_focus.pack(side='left', padx=4)
         cb_focus.bind('<<ComboboxSelected>>', lambda e: self.refresh_view())
 
@@ -244,8 +248,17 @@ class SolarApp:
         btn_edges.pack(side='right', padx=6)
 
         # Neural Network Canvas View
-        self.network_view = SolarNetworkView(parent, height=450)
-        self.network_view.pack(fill='both', expand=True, pady=4)
+        network_frame = ttk.Frame(parent)
+        network_frame.pack(fill='both', expand=True, pady=4)
+        network_frame.rowconfigure(0, weight=1)
+        network_frame.columnconfigure(0, weight=1)
+        self.network_view = SolarNetworkView(network_frame, config=self.config, width=600, height=450)
+        self.network_view.grid(row=0, column=0, sticky='nsew')
+        horizontal_scroll = ttk.Scrollbar(network_frame, orient='horizontal', command=self.network_view.xview)
+        horizontal_scroll.grid(row=1, column=0, sticky='ew')
+        vertical_scroll = ttk.Scrollbar(network_frame, orient='vertical', command=self.network_view.yview)
+        vertical_scroll.grid(row=0, column=1, sticky='ns')
+        self.network_view.configure(xscrollcommand=horizontal_scroll.set, yscrollcommand=vertical_scroll.set)
 
         # Interactive Training Controls
         controls_frame = ttk.LabelFrame(parent, text='Controles de Treinamento e Animação', padding=8)
@@ -326,7 +339,7 @@ class SolarApp:
     def inject_fault(self, anomaly_type):
         synth_img = SolarDataset.generate_synthetic_anomaly(anomaly_type=anomaly_type)
         self.drawing = synth_img.copy()
-        self.current_feature_vector = synth_img.flatten()
+        self.current_feature_vector = self.dataset.build_feature_vector(synth_img, config=self.config)
         self.is_manual_drawing = True
         self.render_image_canvas(self.drawing)
         self.classify_current()
@@ -344,14 +357,14 @@ class SolarApp:
             for c in range(max(0, col - 1), min(24, col + 2)):
                 self.drawing[r, c] = val
 
-        self.current_feature_vector = self.drawing.flatten()
+        self.current_feature_vector = self.dataset.build_feature_vector(self.drawing, config=self.config)
         self.is_manual_drawing = True
         self.render_image_canvas(self.drawing)
         self.refresh_view()
 
     def clear_drawing(self):
         self.drawing.fill(0.25)  # Nominal baseline
-        self.current_feature_vector = self.drawing.flatten()
+        self.current_feature_vector = self.dataset.build_feature_vector(self.drawing, config=self.config)
         self.is_manual_drawing = True
         self.render_image_canvas(self.drawing)
         self.refresh_view()
@@ -398,7 +411,7 @@ class SolarApp:
         real_idx = indices[curr_i]
         img_2d = self.dataset.load_image(real_idx)
         self.drawing = img_2d.copy()
-        self.current_feature_vector = img_2d.flatten()
+        self.current_feature_vector = self.dataset.build_feature_vector(img_2d, config=self.config)
         self.current_label = self.dataset.labels[real_idx]
         self.is_manual_drawing = False
 
@@ -418,7 +431,7 @@ class SolarApp:
     def on_architecture_change(self):
         arch = self.architecture_var.get()
         if 'MLP' in arch:
-            self.mlp = MLPSolarNetwork(num_inputs=960, hidden_grid=(4, 6), num_classes=12)
+            self.mlp = MLPSolarNetwork(config=self.config)
             self.active_model = self.mlp
         else:
             self.active_model = self.perceptron
@@ -428,7 +441,7 @@ class SolarApp:
         self.stop_training()
         arch = self.architecture_var.get()
         if 'MLP' in arch:
-            self.mlp = MLPSolarNetwork(num_inputs=960, hidden_grid=(4, 6), num_classes=12)
+            self.mlp = MLPSolarNetwork(config=self.config)
             self.active_model = self.mlp
         else:
             self.perceptron.reset_weights()
@@ -480,7 +493,7 @@ class SolarApp:
             target=target_lbl,
             is_mlp=is_mlp,
             hidden_activations=hidden_acts,
-            hidden_grid_shape=(4, 6),
+            hidden_grid_shape=(self.mlp.hidden_rows, self.mlp.hidden_cols),
             show_edges=self.show_edges_var.get()
         )
         self.update_audit_plot()
@@ -519,7 +532,7 @@ class SolarApp:
 
         if self.pending_phase == 0:
             self.active_model.train_step_phase1_forward(x, target)
-            self.drawing = x.reshape(40, 24)
+            self.drawing = x[:NUM_PIXELS].reshape(40, 24).copy()
             self.current_feature_vector = x
             self.current_label = target
             self.render_image_canvas(self.drawing)
@@ -575,7 +588,7 @@ class SolarApp:
 
         self.current_feature_vector = x
         self.current_label = target
-        self.drawing = x.reshape(40, 24)
+        self.drawing = x[:NUM_PIXELS].reshape(40, 24).copy()
         self.render_image_canvas(self.drawing)
 
         # Record live metric checkpoint

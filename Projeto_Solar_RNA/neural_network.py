@@ -1,4 +1,26 @@
 import numpy as np
+from Projeto_Solar_RNA.network_config import load_network_config
+
+
+def spatial_receptive_field(weights, shape, mask_shape=None):
+    pixel_count = shape[0] * shape[1]
+    aggregate_end = pixel_count + sum(shape)
+    mask_shape = mask_shape if mask_shape is not None else load_network_config().mask_shape
+    mask_rows, mask_columns = mask_shape
+    mask_count = (shape[0] // mask_rows) * (shape[1] // mask_columns)
+    if len(weights) in (aggregate_end, aggregate_end + mask_count):
+        row_weights = weights[pixel_count:pixel_count + shape[0]]
+        column_weights = weights[pixel_count + shape[0]:aggregate_end]
+        field = (weights[:pixel_count].reshape(shape)
+                 + row_weights[:, None] / shape[1]
+                 + column_weights[None, :] / shape[0])
+        if len(weights) > aggregate_end:
+            mask_weights = weights[aggregate_end:].reshape(shape[0] // mask_rows, shape[1] // mask_columns)
+            field += np.repeat(np.repeat(mask_weights, mask_rows, axis=0), mask_columns, axis=1) / (mask_rows * mask_columns)
+        return field
+    if len(weights) == pixel_count:
+        return weights.reshape(shape)
+    return weights
 
 
 def softmax(x):
@@ -28,10 +50,11 @@ def sigmoid_derivative(x):
 
 class NeuralNetworkBase:
     """Base class for visual inspection & spatial audit of neural networks."""
-    def __init__(self, num_inputs=960, num_classes=12, seed=42):
-        self.num_inputs = num_inputs
-        self.num_classes = num_classes
-        self.rng = np.random.default_rng(seed)
+    def __init__(self, num_inputs=None, num_classes=None, seed=None, config=None):
+        self.config = config if config is not None else load_network_config()
+        self.num_inputs = self.config.num_inputs if num_inputs is None else num_inputs
+        self.num_classes = self.config.num_classes if num_classes is None else num_classes
+        self.rng = np.random.default_rng(self.config.seed if seed is None else seed)
         
         self.last_input = None
         self.last_target = None
@@ -53,13 +76,13 @@ class NeuralNetworkBase:
 
 class SingleLayerPerceptron(NeuralNetworkBase):
     """
-    Multiclass Perceptron (960 spatial inputs -> 12 outputs).
-    No hidden layers. Directly maps 24x40 pixels to the 12 anomaly classes.
+    Multiclass Perceptron with configured input features and output classes.
+    No hidden layers. Uses pixels, row/column means and block means.
     """
-    def __init__(self, num_inputs=960, num_classes=12, seed=42):
-        super().__init__(num_inputs, num_classes, seed)
-        self.weights = np.zeros((num_classes, num_inputs), dtype=np.float32)
-        self.biases = np.zeros(num_classes, dtype=np.float32)
+    def __init__(self, num_inputs=None, num_classes=None, seed=None, config=None):
+        super().__init__(num_inputs, num_classes, seed, config)
+        self.weights = np.zeros((self.num_classes, self.num_inputs), dtype=np.float32)
+        self.biases = np.zeros(self.num_classes, dtype=np.float32)
 
     def reset_weights(self, seed=None):
         if seed is not None:
@@ -110,18 +133,17 @@ class SingleLayerPerceptron(NeuralNetworkBase):
     def get_receptive_field(self, output_idx, shape=(40, 24)):
         """Returns 2D heatmap matrix of weights for an output neuron."""
         w = self.weights[output_idx]
-        if len(w) == shape[0] * shape[1]:
-            return w.reshape(shape)
-        return w
+        return spatial_receptive_field(w, shape, self.config.mask_shape)
 
 
 class MLPSolarNetwork(NeuralNetworkBase):
     """
-    Multi-Layer Perceptron with Spatial Hidden Grid (e.g. 4x6 = 24 detectors).
+    Multi-Layer Perceptron built from the shared network configuration.
     Trained via Backpropagation with Cross-Entropy Loss.
     """
-    def __init__(self, num_inputs=960, hidden_grid=(4, 6), num_classes=12, activation='relu', seed=42):
-        super().__init__(num_inputs, num_classes, seed)
+    def __init__(self, num_inputs=None, hidden_grid=None, num_classes=None, activation=None, seed=None, config=None):
+        super().__init__(num_inputs, num_classes, seed, config)
+        hidden_grid = self.config.hidden_grid if hidden_grid is None else hidden_grid
         
         if isinstance(hidden_grid, tuple):
             self.hidden_rows, self.hidden_cols = hidden_grid
@@ -131,7 +153,7 @@ class MLPSolarNetwork(NeuralNetworkBase):
             self.hidden_rows, self.hidden_cols = 4, int(np.ceil(self.num_hidden / 4))
             self.num_hidden = self.hidden_rows * self.hidden_cols
 
-        self.activation_name = activation
+        self.activation_name = self.config.activation if activation is None else activation
         
         # Layer 1 (Hidden Feature Detectors)
         self.W1 = None
@@ -237,14 +259,12 @@ class MLPSolarNetwork(NeuralNetworkBase):
     def get_hidden_neuron_receptive_field(self, hidden_idx, shape=(40, 24)):
         """Returns 2D heatmap of incoming weights for a specific hidden detector."""
         w = self.W1[hidden_idx]
-        return w.reshape(shape)
+        return spatial_receptive_field(w, shape, self.config.mask_shape)
 
     def get_receptive_field(self, output_idx, shape=(40, 24)):
         """Computes effective input receptive field for output neuron (W2_i @ W1)."""
         w_eff = self.W2[output_idx] @ self.W1
-        if len(w_eff) == shape[0] * shape[1]:
-            return w_eff.reshape(shape)
-        return w_eff
+        return spatial_receptive_field(w_eff, shape, self.config.mask_shape)
 
 
 def evaluate_network(model, dataset, indices, mode='grayscale'):

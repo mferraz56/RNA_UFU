@@ -2,6 +2,11 @@ import json
 from pathlib import Path
 import numpy as np
 from PIL import Image
+from Projeto_Solar_RNA.network_config import load_network_config
+
+IMAGE_SHAPE = (40, 24)
+NUM_PIXELS = 960
+NUM_FEATURES = load_network_config().num_inputs
 
 CLASSES = [
     'No-Anomaly',
@@ -45,7 +50,8 @@ def get_class_group(cls_name):
 
 
 class SolarDataset:
-    def __init__(self, base_path=None):
+    def __init__(self, base_path=None, config=None):
+        self.config = config if config is not None else load_network_config()
         if base_path is None:
             root = Path(__file__).resolve().parent.parent
             base_path = root / 'Dataset' / '2020-02-14_InfraredSolarModules' / 'InfraredSolarModules'
@@ -119,23 +125,77 @@ class SolarDataset:
             return self.cached_images[key]
             
         img_path = self.filepaths[index]
-        img = Image.open(img_path).convert('L')  # Convert to Grayscale
-        arr = np.array(img, dtype=np.float32) / 255.0  # Shape (40, 24)
+        with Image.open(img_path) as img:
+            arr = np.array(img.convert('L'), dtype=np.float32) / 255.0
+        if arr.shape != IMAGE_SHAPE:
+            raise ValueError(f"Imagem {key}: formato {arr.shape}, esperado {IMAGE_SHAPE}")
         
         if cache:
             self.cached_images[key] = arr
         return arr
 
     def get_feature_vector(self, index, mode='grayscale'):
-        img_2d = self.load_image(index)
-        vec = img_2d.flatten()  # 960 elements
-        
+        return self.build_feature_vector(self.load_image(index), mode=mode, config=self.config)
+
+    @staticmethod
+    def build_feature_vector(image, mode='grayscale', config=None):
+        config = config if config is not None else load_network_config()
+        image = np.asarray(image, dtype=np.float32)
+        if image.shape != IMAGE_SHAPE:
+            raise ValueError(f"Formato {image.shape}, esperado {IMAGE_SHAPE}")
         if mode == 'bipolar':
-            return np.where(vec >= 0.5, 1.0, -1.0)
+            image = np.where(image >= 0.5, 1.0, -1.0).astype(np.float32)
         elif mode == 'binary':
-            return (vec >= 0.5).astype(np.float32)
-        else:
-            return vec
+            image = (image >= 0.5).astype(np.float32)
+        mask_rows, mask_columns = config.mask_shape
+        grid_rows, grid_columns = config.mask_grid
+        masks = image.reshape(grid_rows, mask_rows, grid_columns, mask_columns).mean(axis=(1, 3))
+        return np.concatenate((image.ravel(), image.mean(axis=1), image.mean(axis=0), masks.ravel()))
+
+    def export_intensity_statistics(self, output_path=None):
+        if not self.image_keys:
+            raise ValueError("Nenhuma imagem disponivel para calcular estatisticas")
+        if output_path is None:
+            output_path = Path(__file__).resolve().parent / 'resultados' / 'estatisticas_imagens.json'
+        output_path = Path(output_path)
+        records = []
+        for index, key in enumerate(self.image_keys):
+            image = self.load_image(index, cache=False)
+            minimum = int(round(float(image.min()) * 255))
+            maximum = int(round(float(image.max()) * 255))
+            records.append({
+                'id': key,
+                'class': IDX_TO_CLASS[int(self.labels[index])],
+                'min': minimum,
+                'max': maximum,
+                'min_normalized': minimum / 255.0,
+                'max_normalized': maximum / 255.0,
+            })
+        darkest = min(record['min'] for record in records)
+        lightest = max(record['max'] for record in records)
+        statistics = {
+            'image_count': len(records),
+            'image_shape': list(IMAGE_SHAPE),
+            'intensity_scale': [0, 255],
+            'darkest': {
+                'value': darkest,
+                'normalized_value': darkest / 255.0,
+                'images': [{'id': record['id'], 'class': record['class']}
+                           for record in records if record['min'] == darkest],
+            },
+            'lightest': {
+                'value': lightest,
+                'normalized_value': lightest / 255.0,
+                'images': [{'id': record['id'], 'class': record['class']}
+                           for record in records if record['max'] == lightest],
+            },
+            'images': records,
+        }
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with output_path.open('w', encoding='utf-8') as output_file:
+            json.dump(statistics, output_file, indent=2, ensure_ascii=False)
+            output_file.write('\n')
+        return output_path
 
     def preload_subset(self, indices, max_count=1000):
         sub = indices[:max_count]

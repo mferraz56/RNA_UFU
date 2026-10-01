@@ -1,3 +1,5 @@
+https://ieeexplore.ieee.org/document/10489529
+
 O problema de classificação é treinavel mas acredito estar com resultados ruins. 
 
 quero que implemente da seguinte maneira para testarmos. 

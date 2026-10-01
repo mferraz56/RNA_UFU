@@ -1,0 +1,1 @@
+.\.venv\Scripts\python.exe "Aula06 - Redes Multicamadas/EXERCICIO/main.py"

@@ -1,0 +1,14 @@
+{
+  "No-Anomaly": 10000,
+  "Cell": 1877,
+  "Cell-Multi": 1288,
+  "Cracking": 940,
+  "Hot-Spot": 249,
+  "Hot-Spot-Multi": 246,
+  "Shadowing": 1056,
+  "Diode": 1499,
+  "Diode-Multi": 175,
+  "Vegetation": 1639,
+  "Soiling": 204,
+  "Offline-Module": 827
+}
